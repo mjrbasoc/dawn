@@ -8,7 +8,7 @@ if (!customElements.get('product-info')) {
       cartUpdateUnsubscriber = undefined;
       swapProductUtility = undefined;
       abortController = undefined;
-      inflightRequestProductUrl = null;
+      pendingRequestUrl = null;
 
       constructor() {
         super();
@@ -72,19 +72,37 @@ if (!customElements.get('product-info')) {
       handleOptionValueChange({ data: { event, target, selectedOptionValues } }) {
         if (!this.contains(event.target)) return;
 
-        const baseUrl = target.dataset.productUrl || this.inflightRequestProductUrl || this.dataset.url;
-        this.inflightRequestProductUrl = baseUrl;
+        this.resetProductFormState();
 
+        // url of the product associated with the selected option value
+        const productUrl = target.dataset.productUrl || this.pendingRequestUrl || this.dataset.url;
+
+        let requestUrl, shouldSwapProduct, shouldFetchFullPage;
+        if (this.isFeaturedProduct) {
+          requestUrl = window.location.pathname;
+          shouldSwapProduct = target.dataset.productUrl && this.dataset.url !== target.dataset.productUrl;
+          shouldFetchFullPage = false;
+        } else {
+          requestUrl = productUrl;
+          shouldSwapProduct = this.dataset.url !== requestUrl;
+          shouldFetchFullPage = shouldSwapProduct;
+        }
+
+        this.renderProductInfo({
+          requestUrl: this.buildRequestUrlWithParams(requestUrl, selectedOptionValues, shouldFetchFullPage),
+          targetId: target.id,
+          callback: shouldSwapProduct ? this.handleSwapProduct(productUrl) : this.handleUpdateProductInfo(productUrl),
+        });
+      }
+
+      resetProductFormState() {
         const productForm = this.productForm;
         productForm?.toggleSubmitButton(true);
         productForm?.handleErrorMessage();
+      }
 
-        const shouldSwapProduct = this.dataset.url !== baseUrl;
-        this.renderProductInfo({
-          productUrl: this.getProductInfoUrl(baseUrl, selectedOptionValues, shouldSwapProduct),
-          targetId: target.id,
-          callback: shouldSwapProduct ? this.handleSwapProduct(baseUrl) : this.handleUpdateProductInfo(baseUrl),
-        });
+      get isFeaturedProduct() {
+        return this.dataset.section.includes('featured_product');
       }
 
       handleSwapProduct(baseUrl) {
@@ -107,14 +125,15 @@ if (!customElements.get('product-info')) {
         };
       }
 
-      renderProductInfo({ productUrl, targetId, callback }) {
+      renderProductInfo({ requestUrl, targetId, callback }) {
         this.abortController?.abort();
         this.abortController = new AbortController();
 
-        fetch(productUrl, { signal: this.abortController.signal })
+        this.pendingRequestUrl = requestUrl;
+        fetch(requestUrl, { signal: this.abortController.signal })
           .then((response) => response.text())
           .then((responseText) => {
-            this.inflightRequestProductUrl = null;
+            this.pendingRequestUrl = null;
             const html = new DOMParser().parseFromString(responseText, 'text/html');
             callback(html);
           })
@@ -136,7 +155,7 @@ if (!customElements.get('product-info')) {
         return !!selectedVariant ? JSON.parse(selectedVariant) : null;
       }
 
-      getProductInfoUrl(url, optionValues, shouldFetchFullPage = false) {
+      buildRequestUrlWithParams(url, optionValues, shouldFetchFullPage = false) {
         const params = [];
 
         !shouldFetchFullPage && params.push(`section_id=${this.sectionId}`);
@@ -213,7 +232,7 @@ if (!customElements.get('product-info')) {
       }
 
       updateURL(url, variantId) {
-        this.querySelector('share-url')?.updateUrl(
+        this.querySelector('share-button')?.updateUrl(
           `${window.shopUrl}${url}${variantId ? `?variant=${variantId}` : ''}`
         );
 
